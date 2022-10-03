@@ -1,0 +1,379 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace OAuth2Outlook
+{
+    class Program
+    {
+        static bool LoginUsingOauth2RefreshToken()
+        {
+            Chilkat.JsonObject jsonToken = new Chilkat.JsonObject();
+            bool success = jsonToken.LoadFile("qa_data/tokens/office365.json");
+            if (success != true)
+            {
+                Debug.WriteLine("Failed to load office365.json");
+                return false;
+            }
+
+            // The access token JSON looks something like this:
+
+            // 	{ 
+            // 	 "access_token": "abac.Ci-ZabcdF37-NUrmSzxbHxTsMbtlN-uPfabcdAQN_2ekzj0s5ofCzRabcdTDMGaa2Q",
+            // 	 "token_type": "Bearer",
+            // 	 "expires_in": 3600,
+            // 	 "refresh_token": "1/lEe5abcdNJ77eOSDBabcdkQGVmDalkwabcdR2Hatbo"
+            // 	}
+            // 
+
+            Chilkat.OAuth2 oauth2 = new Chilkat.OAuth2();
+
+            oauth2.TokenEndpoint = "https://login.microsoftonline.com/e2ba81b8-03fe-407c-96a1-f4bc0f512e7d/oauth2/v2.0/token";
+
+            // Replace these with actual values.
+            oauth2.ClientId = "e83a4442-93da-4dd9-a728-97aadbbe5d3d";
+            oauth2.ClientSecret = "qUH8Q~db2t8NcsxjiGOG-684dtjacwg8TmUkTa67";
+
+            // Get the "refresh_token"
+            oauth2.RefreshToken = jsonToken.StringOf("refresh_token");
+
+            // Send the HTTP POST to refresh the access token..
+            success = oauth2.RefreshAccessToken();
+            if (success != true)
+            {
+                Debug.WriteLine(oauth2.LastErrorText);
+                return false;
+            }
+
+            Debug.WriteLine("New access token: " + oauth2.AccessToken);
+
+            // The response contains a new access token, but we must keep
+            // our existing refresh token for when we need to refresh again in the future.
+            jsonToken.UpdateString("access_token", oauth2.AccessToken);
+
+            // Save the new JSON access token response to a file.
+            Chilkat.StringBuilder sbJson = new Chilkat.StringBuilder();
+            jsonToken.EmitCompact = false;
+            jsonToken.EmitSb(sbJson);
+            sbJson.WriteFile("qa_data/tokens/office365.json", "utf-8", false);
+
+            Debug.WriteLine("Access token refreshed!");
+            Debug.WriteLine("New Access Token = " + oauth2.AccessToken);
+            return true;
+        }
+        static bool LoginUsingOauth2BySignInUsingMicrosoftAccount()
+        {
+            Chilkat.OAuth2 oauth2 = new Chilkat.OAuth2();
+            // This should be the port in the localhost callback URL for your app.  
+            // The callback URL would look like "http://localhost:3017/" if the port number is 3017.
+            oauth2.ListenPort = 3017;
+
+            // Replace these with actual values.
+            //microsoft
+            //oauth2.ClientId = Settings.ClientId;
+            oauth2.ClientId = "e83a4442-93da-4dd9-a728-97aadbbe5d3d";
+            oauth2.ClientSecret = "qUH8Q~db2t8NcsxjiGOG-684dtjacwg8TmUkTa67";
+            // Use your OAuth2 authorization endpoints (v2)
+            oauth2.AuthorizationEndpoint = "https://login.microsoftonline.com/e2ba81b8-03fe-407c-96a1-f4bc0f512e7d/oauth2/v2.0/authorize";
+            oauth2.TokenEndpoint = "https://login.microsoftonline.com/e2ba81b8-03fe-407c-96a1-f4bc0f512e7d/oauth2/v2.0/token";
+
+            oauth2.CodeChallenge = false;
+
+            // Provide a SPACE separated list of scopes.
+            // Important: The offline_access scope is needed to get a refresh token.
+            oauth2.Scope = "https://outlook.office365.com/IMAP.AccessAsUser.All";
+
+            // Begin the OAuth2 three-legged flow.  This returns a URL that should be loaded in a browser.
+            string url = oauth2.StartAuth();
+            if (oauth2.LastMethodSuccess != true)
+            {
+                Debug.WriteLine(oauth2.LastErrorText);
+                return false;
+            }
+
+            // At this point, your application should load the URL in a browser.
+            // For example, 
+            Process.Start(url);
+            // The Microsoft account owner would interactively accept or deny the authorization request.
+
+            // Add the code to load the url in a web browser here...
+            // Add the code to load the url in a web browser here...
+            // Add the code to load the url in a web browser here...
+
+            // ----------------------------------------------------------------------
+            // Note: Read about how browser caching of credentials can cause problems.
+            // See OAuth2 Browser Caching Credentials
+            // ----------------------------------------------------------------------
+
+            // Now wait for the authorization.
+            // We'll wait for a max of 30 seconds.
+            int numMsWaited = 0;
+            while ((numMsWaited < 30000) && (oauth2.AuthFlowState < 3))
+            {
+                oauth2.SleepMs(100);
+                numMsWaited = numMsWaited + 100;
+            }
+
+            // If there was no response from the browser within 30 seconds, then 
+            // the AuthFlowState will be equal to 1 or 2.
+            // 1: Waiting for Redirect. The OAuth2 background thread is waiting to receive the redirect HTTP request from the browser.
+            // 2: Waiting for Final Response. The OAuth2 background thread is waiting for the final access token response.
+            // In that case, cancel the background task started in the call to StartAuth.
+            if (oauth2.AuthFlowState < 3)
+            {
+                oauth2.Cancel();
+                Debug.WriteLine("No response from the browser!");
+                return false;
+            }
+
+            // Check the AuthFlowState to see if authorization was granted, denied, or if some error occurred
+            // The possible AuthFlowState values are:
+            // 3: Completed with Success. The OAuth2 flow has completed, the background thread exited, and the successful JSON response is available in AccessTokenResponse property.
+            // 4: Completed with Access Denied. The OAuth2 flow has completed, the background thread exited, and the error JSON is available in AccessTokenResponse property.
+            // 5: Failed Prior to Completion. The OAuth2 flow failed to complete, the background thread exited, and the error information is available in the FailureInfo property.
+            if (oauth2.AuthFlowState == 5)
+            {
+                Debug.WriteLine("OAuth2 failed to complete.");
+                Debug.WriteLine(oauth2.FailureInfo);
+                return false;
+            }
+
+            if (oauth2.AuthFlowState == 4)
+            {
+                Debug.WriteLine("OAuth2 authorization was denied.");
+                Debug.WriteLine(oauth2.AccessTokenResponse);
+                return false;
+            }
+
+            if (oauth2.AuthFlowState != 3)
+            {
+                Debug.WriteLine("Unexpected AuthFlowState:" + Convert.ToString(oauth2.AuthFlowState));
+                return false;
+            }
+
+            Debug.WriteLine("OAuth2 authorization granted!");
+            Debug.WriteLine("Access Token = " + oauth2.AccessToken);
+
+            // Get the full JSON response:
+            Chilkat.JsonObject jsonToken = new Chilkat.JsonObject();
+            jsonToken.Load(oauth2.AccessTokenResponse);
+            jsonToken.EmitCompact = false;
+
+            // The JSON response looks like this:
+            // 
+            // {
+            //   "token_type": "Bearer",
+            //   "scope": "IMAP.AccessAsUser.All openid POP.AccessAsUser.All profile SMTP.Send email",
+            //   "expires_in": 3599,
+            //   "ext_expires_in": 3599,
+            //   "access_token": "...",
+            //   "refresh_token": "...",
+            //   "id_token": "...",
+            //   "expires_on": "1592748507"
+            // }
+
+            Debug.WriteLine(jsonToken.Emit());
+
+            // Save the JSON to a file for future requests.
+            Chilkat.FileAccess fac = new Chilkat.FileAccess();
+            fac.WriteEntireTextFile("qa_data/tokens/office365.json", jsonToken.Emit(), "utf-8", false);
+            Debug.WriteLine("OAuth2 authorization granted!");
+            Debug.WriteLine("Access Token: " + oauth2.AccessToken);
+            return true;
+        }
+
+        static bool UnlockChilkat()
+        {
+            Chilkat.Global glob = new Chilkat.Global();
+            bool success = glob.UnlockBundle("MBYLES.CBX072020_VEgyJM5T8W5V");
+            if (success != true)
+            {
+                Debug.WriteLine(glob.LastErrorText);
+                return false;
+            }
+
+            int status = glob.UnlockStatus;
+            if (status == 2)
+            {
+                Debug.WriteLine("Unlocked using purchased unlock code.");
+                return true;
+            }
+            else
+            {
+                Debug.WriteLine("Unlocked in trial mode.");
+                return true;
+            }
+
+            // The LastErrorText can be examined in the success case to see if it was unlocked in
+            // trial more, or with a purchased unlock code.
+            Debug.WriteLine(glob.LastErrorText);
+            return false;
+        }
+        static bool Login()
+        {
+            if (UnlockChilkat() == false) return false;
+
+            if (LoginUsingOauth2RefreshToken())
+                return true;
+
+            if (LoginUsingOauth2RefreshToken() == false)
+            {
+                if (LoginUsingOauth2BySignInUsingMicrosoftAccount() == true) return true;
+            }
+
+            return false;
+        }
+        static void Main(string[] args)
+        {
+            Console.WriteLine( Login() );
+            return;
+            Chilkat.Global glob = new Chilkat.Global();
+            bool success = glob.UnlockBundle("MBYLES.CBX072020_VEgyJM5T8W5V");
+            if (success != true)
+            {
+                Debug.WriteLine(glob.LastErrorText);
+                return;
+            }
+
+            int status = glob.UnlockStatus;
+            if (status == 2)
+            {
+                Debug.WriteLine("Unlocked using purchased unlock code.");
+            }
+            else
+            {
+                Debug.WriteLine("Unlocked in trial mode.");
+            }
+
+            // The LastErrorText can be examined in the success case to see if it was unlocked in
+            // trial more, or with a purchased unlock code.
+            Debug.WriteLine(glob.LastErrorText);
+            //----------------
+            Chilkat.OAuth2 oauth2 = new Chilkat.OAuth2();
+            
+
+            // This should be the port in the localhost callback URL for your app.  
+            // The callback URL would look like "http://localhost:3017/" if the port number is 3017.
+            oauth2.ListenPort = 3017;
+
+            // Replace these with actual values.
+            //microsoft
+            //oauth2.ClientId = Settings.ClientId;
+            oauth2.ClientId = "e83a4442-93da-4dd9-a728-97aadbbe5d3d";
+            oauth2.ClientSecret = "qUH8Q~db2t8NcsxjiGOG-684dtjacwg8TmUkTa67";
+            // Use your OAuth2 authorization endpoints (v2)
+            oauth2.AuthorizationEndpoint = "https://login.microsoftonline.com/e2ba81b8-03fe-407c-96a1-f4bc0f512e7d/oauth2/v2.0/authorize";
+            oauth2.TokenEndpoint = "https://login.microsoftonline.com/e2ba81b8-03fe-407c-96a1-f4bc0f512e7d/oauth2/v2.0/token";
+
+
+
+            oauth2.CodeChallenge = false;
+
+            // Provide a SPACE separated list of scopes.
+            // Important: The offline_access scope is needed to get a refresh token.
+            oauth2.Scope = "https://outlook.office365.com/IMAP.AccessAsUser.All";
+
+            // Begin the OAuth2 three-legged flow.  This returns a URL that should be loaded in a browser.
+            string url = oauth2.StartAuth();
+            if (oauth2.LastMethodSuccess != true)
+            {
+                Debug.WriteLine(oauth2.LastErrorText);
+                return;
+            }
+
+            // At this point, your application should load the URL in a browser.
+            // For example, 
+            System.Diagnostics.Process.Start(url);      
+            // The Microsoft account owner would interactively accept or deny the authorization request.
+
+            // Add the code to load the url in a web browser here...
+            // Add the code to load the url in a web browser here...
+            // Add the code to load the url in a web browser here...
+
+            // ----------------------------------------------------------------------
+            // Note: Read about how browser caching of credentials can cause problems.
+            // See OAuth2 Browser Caching Credentials
+            // ----------------------------------------------------------------------
+
+            // Now wait for the authorization.
+            // We'll wait for a max of 30 seconds.
+            int numMsWaited = 0;
+            while ((numMsWaited < 30000) && (oauth2.AuthFlowState < 3))
+            {
+                oauth2.SleepMs(100);
+                numMsWaited = numMsWaited + 100;
+            }
+
+            // If there was no response from the browser within 30 seconds, then 
+            // the AuthFlowState will be equal to 1 or 2.
+            // 1: Waiting for Redirect. The OAuth2 background thread is waiting to receive the redirect HTTP request from the browser.
+            // 2: Waiting for Final Response. The OAuth2 background thread is waiting for the final access token response.
+            // In that case, cancel the background task started in the call to StartAuth.
+            if (oauth2.AuthFlowState < 3)
+            {
+                oauth2.Cancel();
+                Debug.WriteLine("No response from the browser!");
+                return;
+            }
+
+            // Check the AuthFlowState to see if authorization was granted, denied, or if some error occurred
+            // The possible AuthFlowState values are:
+            // 3: Completed with Success. The OAuth2 flow has completed, the background thread exited, and the successful JSON response is available in AccessTokenResponse property.
+            // 4: Completed with Access Denied. The OAuth2 flow has completed, the background thread exited, and the error JSON is available in AccessTokenResponse property.
+            // 5: Failed Prior to Completion. The OAuth2 flow failed to complete, the background thread exited, and the error information is available in the FailureInfo property.
+            if (oauth2.AuthFlowState == 5)
+            {
+                Debug.WriteLine("OAuth2 failed to complete.");
+                Debug.WriteLine(oauth2.FailureInfo);
+                return;
+            }
+
+            if (oauth2.AuthFlowState == 4)
+            {
+                Debug.WriteLine("OAuth2 authorization was denied.");
+                Debug.WriteLine(oauth2.AccessTokenResponse);
+                return;
+            }
+
+            if (oauth2.AuthFlowState != 3)
+            {
+                Debug.WriteLine("Unexpected AuthFlowState:" + Convert.ToString(oauth2.AuthFlowState));
+                return;
+            }
+
+            Debug.WriteLine("OAuth2 authorization granted!");
+            Debug.WriteLine("Access Token = " + oauth2.AccessToken);
+
+            // Get the full JSON response:
+            Chilkat.JsonObject json = new Chilkat.JsonObject();
+            json.Load(oauth2.AccessTokenResponse);
+            json.EmitCompact = false;
+
+            // The JSON response looks like this:
+            // 
+            // {
+            //   "token_type": "Bearer",
+            //   "scope": "IMAP.AccessAsUser.All openid POP.AccessAsUser.All profile SMTP.Send email",
+            //   "expires_in": 3599,
+            //   "ext_expires_in": 3599,
+            //   "access_token": "...",
+            //   "refresh_token": "...",
+            //   "id_token": "...",
+            //   "expires_on": "1592748507"
+            // }
+
+            Debug.WriteLine(json.Emit());
+
+            // Save the JSON to a file for future requests.
+            Chilkat.FileAccess fac = new Chilkat.FileAccess();
+            fac.WriteEntireTextFile("qa_data/tokens/office365.json", json.Emit(), "utf-8", false);
+            Debug.WriteLine("OAuth2 authorization granted!");
+            Debug.WriteLine("Access Token: " + oauth2.AccessToken);
+            //https://www.example-code.com/csharp/gmail_imap_refresh_oauth2_token.asp
+
+        }
+    }
+}
